@@ -50,13 +50,9 @@ const state = {
 };
 
 function fetchNoCache(url) {
-  return fetch(url, {
-    cache: "no-store",
-    headers: {
-      "Cache-Control": "no-cache",
-      Pragma: "no-cache",
-    },
-  });
+  const bustUrl = new URL(url);
+  bustUrl.searchParams.set("_t", `${Date.now()}`);
+  return fetch(bustUrl.toString(), { cache: "no-store" });
 }
 
 function resolveLocation() {
