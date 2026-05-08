@@ -116,9 +116,18 @@ function formatHour(dateIso) {
   });
 }
 
+function parseDateSafe(dateText) {
+  // Date-only strings can shift to previous day when parsed as UTC in US timezones.
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateText)) {
+    const [year, month, day] = dateText.split("-").map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0);
+  }
+  return new Date(dateText);
+}
+
 function formatDay(dateIso) {
   const timeZone = getTimeZone();
-  return new Date(dateIso).toLocaleDateString("en-US", {
+  return parseDateSafe(dateIso).toLocaleDateString("en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",
@@ -143,8 +152,13 @@ function renderWeather(data) {
     timeZone,
   })}`;
 
-  const cards = data.hourly
-    .slice(0, 8)
+  const nowMs = Date.now();
+  const upcoming = (data.hourly || []).filter(
+    (hour) => parseDateSafe(hour.time).getTime() >= nowMs - 30 * 60 * 1000
+  );
+  const nextHourly = (upcoming.length ? upcoming : data.hourly || []).slice(0, 8);
+
+  const cards = nextHourly
     .map((hour) => {
       const icon = pickIcon(hour.summary);
       return `
