@@ -135,6 +135,21 @@ function formatDay(dateIso) {
   });
 }
 
+function getNextHourlyWindow(hourlyEntries, count = 8) {
+  const nowMs = Date.now();
+  const sorted = (hourlyEntries || [])
+    .filter((hour) => Number.isFinite(hour?.temperature) && hour?.time)
+    .map((hour) => ({ ...hour, _ms: parseDateSafe(hour.time).getTime() }))
+    .filter((hour) => Number.isFinite(hour._ms))
+    .sort((a, b) => a._ms - b._ms);
+
+  if (sorted.length === 0) return [];
+
+  const startIdx = sorted.findIndex((hour) => hour._ms >= nowMs);
+  const safeStart = startIdx === -1 ? Math.max(0, sorted.length - count) : startIdx;
+  return sorted.slice(safeStart, safeStart + count);
+}
+
 function renderWeather(data) {
   const timeZone = getTimeZone();
   const currentIcon = pickIcon(data.current.summary);
@@ -152,11 +167,7 @@ function renderWeather(data) {
     timeZone,
   })}`;
 
-  const nowMs = Date.now();
-  const upcoming = (data.hourly || []).filter(
-    (hour) => parseDateSafe(hour.time).getTime() >= nowMs - 30 * 60 * 1000
-  );
-  const nextHourly = (upcoming.length ? upcoming : data.hourly || []).slice(0, 8);
+  const nextHourly = getNextHourlyWindow(data.hourly, 8);
 
   const cards = nextHourly
     .map((hour) => {
