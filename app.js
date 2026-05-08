@@ -276,7 +276,7 @@ async function getNwsWeather() {
       unit: current.temperatureUnit || "F",
       summary: current.shortForecast || "Unavailable",
     },
-    hourly: periods.slice(0, 8).map((p) => ({
+    hourly: periods.slice(0, 72).map((p) => ({
       time: p.startTime,
       temperature: p.temperature,
       unit: p.temperatureUnit || "F",
@@ -343,7 +343,7 @@ async function getTomorrowWeather() {
       unit: "F",
       summary: mapTomorrowCode(current.values.weatherCode),
     },
-    hourly: hourly.slice(0, 8).map((entry) => ({
+    hourly: hourly.slice(0, 72).map((entry) => ({
       time: entry.time,
       temperature: entry.values.temperature,
       unit: "F",
@@ -432,7 +432,7 @@ async function getOpenMeteoWeather() {
       unit: "F",
       summary: mapOpenMeteoCode(currentCode),
     },
-    hourly: hourlyTimes.slice(0, 8).map((time, idx) => ({
+    hourly: hourlyTimes.slice(0, 72).map((time, idx) => ({
       time,
       temperature: hourlyTemps[idx],
       unit: "F",
