@@ -9,7 +9,7 @@ const CONFIG = {
   timezone: null,
 
   // Options: "nws", "tomorrow", "auto"
-  provider: "auto",
+  provider: "nws",
 
   // Required only for Tomorrow.io usage.
   tomorrowApiKey: "",
