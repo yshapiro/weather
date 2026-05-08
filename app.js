@@ -8,8 +8,8 @@ const CONFIG = {
   // Keep null to follow the iPad/browser local timezone automatically.
   timezone: null,
 
-  // Options: "nws", "tomorrow", "auto"
-  provider: "nws",
+  // Options: "nws", "tomorrow", "openmeteo", "auto"
+  provider: "auto",
 
   // Required only for Tomorrow.io usage.
   tomorrowApiKey: "",
@@ -334,6 +334,95 @@ async function getTomorrowWeather() {
   };
 }
 
+function mapOpenMeteoCode(code) {
+  const map = {
+    0: "Clear",
+    1: "Mostly Clear",
+    2: "Partly Cloudy",
+    3: "Cloudy",
+    45: "Fog",
+    48: "Fog",
+    51: "Drizzle",
+    53: "Drizzle",
+    55: "Drizzle",
+    61: "Rain",
+    63: "Rain",
+    65: "Heavy Rain",
+    66: "Freezing Rain",
+    67: "Freezing Rain",
+    71: "Snow",
+    73: "Snow",
+    75: "Heavy Snow",
+    77: "Snow",
+    80: "Rain Showers",
+    81: "Rain Showers",
+    82: "Heavy Rain Showers",
+    85: "Snow Showers",
+    86: "Heavy Snow Showers",
+    95: "Thunderstorm",
+    96: "Thunderstorm",
+    99: "Thunderstorm",
+  };
+  return map[code] || "Unknown";
+}
+
+async function getOpenMeteoWeather() {
+  const params = new URLSearchParams({
+    latitude: `${state.latitude}`,
+    longitude: `${state.longitude}`,
+    current: "temperature_2m,weather_code",
+    hourly: "temperature_2m,weather_code",
+    daily: "temperature_2m_max,temperature_2m_min,weather_code",
+    temperature_unit: "fahrenheit",
+    timezone: "auto",
+    forecast_days: "5",
+  });
+
+  const url = `https://api.open-meteo.com/v1/forecast?${params.toString()}`;
+  const res = await fetchNoCache(url);
+  if (!res.ok) {
+    throw new Error(`Open-Meteo forecast failed (${res.status})`);
+  }
+
+  const data = await res.json();
+  const currentTemp = data?.current?.temperature_2m;
+  const currentCode = data?.current?.weather_code;
+  const hourlyTimes = data?.hourly?.time ?? [];
+  const hourlyTemps = data?.hourly?.temperature_2m ?? [];
+  const hourlyCodes = data?.hourly?.weather_code ?? [];
+  const dailyTimes = data?.daily?.time ?? [];
+  const dailyHighs = data?.daily?.temperature_2m_max ?? [];
+  const dailyLows = data?.daily?.temperature_2m_min ?? [];
+  const dailyCodes = data?.daily?.weather_code ?? [];
+
+  if (!Number.isFinite(currentTemp) || hourlyTimes.length === 0 || dailyTimes.length === 0) {
+    throw new Error("Open-Meteo returned incomplete forecast data");
+  }
+
+  return {
+    source: "Open-Meteo",
+    location: `ZIP ${CONFIG.zipCode} (${state.latitude.toFixed(4)}, ${state.longitude.toFixed(4)})`,
+    current: {
+      temperature: currentTemp,
+      unit: "F",
+      summary: mapOpenMeteoCode(currentCode),
+    },
+    hourly: hourlyTimes.slice(0, 8).map((time, idx) => ({
+      time,
+      temperature: hourlyTemps[idx],
+      unit: "F",
+      summary: mapOpenMeteoCode(hourlyCodes[idx]),
+    })),
+    daily: dailyTimes.slice(0, 5).map((time, idx) => ({
+      time,
+      high: dailyHighs[idx],
+      low: dailyLows[idx],
+      unit: "F",
+      summary: mapOpenMeteoCode(dailyCodes[idx]),
+    })),
+  };
+}
+
 async function fetchWeather() {
   if (state.isFetching) return;
   state.isFetching = true;
@@ -350,11 +439,16 @@ async function fetchWeather() {
       if (CONFIG.tomorrowApiKey) {
         options.push(getTomorrowWeather);
       }
+      options.push(getOpenMeteoWeather);
+      options.push(getNwsWeather);
+    } else if (CONFIG.provider === "openmeteo") {
+      options.push(getOpenMeteoWeather);
       options.push(getNwsWeather);
     } else if (CONFIG.provider === "auto") {
       if (CONFIG.tomorrowApiKey) {
         options.push(getTomorrowWeather);
       }
+      options.push(getOpenMeteoWeather);
       options.push(getNwsWeather);
     }
 
