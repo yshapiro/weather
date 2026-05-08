@@ -1,7 +1,10 @@
 const CONFIG = {
-  // Set fixed location for a touchless wall display.
-  latitude: 47.6062,
-  longitude: -122.3321,
+  // Fixed location for ZIP 08701 (Lakewood, NJ).
+  latitude: 40.0979,
+  longitude: -74.2176,
+  // Keep false to always use the fixed ZIP location above.
+  useGeolocation: false,
+  zipCode: "08701",
   // Keep null to follow the iPad/browser local timezone automatically.
   timezone: null,
 
@@ -23,7 +26,8 @@ const WEATHER_ICONS = [
   { test: /wind/i, icon: "💨" },
 ];
 
-const REFRESH_INTERVAL_MS = 30 * 60 * 1000;
+const REFRESH_INTERVAL_MS = 15 * 60 * 1000;
+const RETRY_INTERVAL_MS = 60 * 1000;
 
 const el = {
   time: document.getElementById("current-time"),
@@ -35,8 +39,46 @@ const el = {
   dailyForecast: document.getElementById("daily-forecast"),
   status: document.getElementById("status"),
   lastUpdated: document.getElementById("last-updated"),
+  locationName: document.getElementById("location-name"),
   sourceName: document.getElementById("source-name"),
 };
+
+const state = {
+  latitude: CONFIG.latitude,
+  longitude: CONFIG.longitude,
+  isFetching: false,
+};
+
+function fetchNoCache(url) {
+  return fetch(url, {
+    cache: "no-store",
+    headers: {
+      "Cache-Control": "no-cache",
+      Pragma: "no-cache",
+    },
+  });
+}
+
+function resolveLocation() {
+  if (!CONFIG.useGeolocation || !("geolocation" in navigator)) {
+    return Promise.resolve({ latitude: CONFIG.latitude, longitude: CONFIG.longitude });
+  }
+
+  return new Promise((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        resolve({
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+        });
+      },
+      () => {
+        resolve({ latitude: CONFIG.latitude, longitude: CONFIG.longitude });
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 5 * 60 * 1000 }
+    );
+  });
+}
 
 function getTimeZone() {
   return CONFIG.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -95,6 +137,9 @@ function renderWeather(data) {
   el.temp.textContent = `${Math.round(data.current.temperature)}°${data.current.unit}`;
   el.summary.textContent = data.current.summary;
   el.sourceName.textContent = `Source: ${data.source}`;
+  if (el.locationName) {
+    el.locationName.textContent = `Location: ${data.location || `ZIP ${CONFIG.zipCode}`}`;
+  }
   el.lastUpdated.textContent = `Last updated: ${new Date().toLocaleTimeString("en-US", {
     hour: "2-digit",
     minute: "2-digit",
@@ -176,18 +221,22 @@ function buildDailyFromHourly(hourlyPeriods) {
 }
 
 async function getNwsWeather() {
-  const pointUrl = `https://api.weather.gov/points/${CONFIG.latitude},${CONFIG.longitude}`;
-  const pointRes = await fetch(pointUrl);
+  const pointUrl = `https://api.weather.gov/points/${state.latitude},${state.longitude}`;
+  const pointRes = await fetchNoCache(pointUrl);
   if (!pointRes.ok) {
     throw new Error(`NWS points lookup failed (${pointRes.status})`);
   }
   const pointData = await pointRes.json();
+  const rel = pointData?.properties?.relativeLocation?.properties;
+  const locationText = rel?.city && rel?.state
+    ? `${rel.city}, ${rel.state} (ZIP ${CONFIG.zipCode})`
+    : `ZIP ${CONFIG.zipCode} (${state.latitude.toFixed(4)}, ${state.longitude.toFixed(4)})`;
   const hourlyUrl = pointData.properties.forecastHourly;
   if (!hourlyUrl) {
     throw new Error("NWS hourly forecast URL not available for this location");
   }
 
-  const hourlyRes = await fetch(hourlyUrl);
+  const hourlyRes = await fetchNoCache(hourlyUrl);
   if (!hourlyRes.ok) {
     throw new Error(`NWS hourly forecast failed (${hourlyRes.status})`);
   }
@@ -200,6 +249,7 @@ async function getNwsWeather() {
   const current = periods[0];
   return {
     source: "National Weather Service",
+    location: locationText,
     current: {
       temperature: current.temperature,
       unit: current.temperatureUnit || "F",
@@ -221,7 +271,7 @@ async function getTomorrowWeather() {
   }
 
   const params = new URLSearchParams({
-    location: `${CONFIG.latitude},${CONFIG.longitude}`,
+    location: `${state.latitude},${state.longitude}`,
     units: "imperial",
     timesteps: "1h,1d",
     fields: "temperature,temperatureMax,temperatureMin,weatherCode",
@@ -229,7 +279,7 @@ async function getTomorrowWeather() {
   });
 
   const url = `https://api.tomorrow.io/v4/weather/forecast?${params.toString()}`;
-  const res = await fetch(url);
+  const res = await fetchNoCache(url);
   if (!res.ok) {
     throw new Error(`Tomorrow.io forecast failed (${res.status})`);
   }
@@ -266,6 +316,7 @@ async function getTomorrowWeather() {
   const current = hourly[0];
   return {
     source: "Tomorrow.io",
+    location: `ZIP ${CONFIG.zipCode} (${state.latitude.toFixed(4)}, ${state.longitude.toFixed(4)})`,
     current: {
       temperature: current.values.temperature,
       unit: "F",
@@ -288,31 +339,43 @@ async function getTomorrowWeather() {
 }
 
 async function fetchWeather() {
-  const options = [];
-  if (CONFIG.provider === "nws") options.push(getNwsWeather);
-  if (CONFIG.provider === "tomorrow") options.push(getTomorrowWeather);
-  if (CONFIG.provider === "auto") {
-    // If Tomorrow key exists, try Tomorrow first. Otherwise NWS first.
-    if (CONFIG.tomorrowApiKey) {
-      options.push(getTomorrowWeather, getNwsWeather);
-    } else {
-      options.push(getNwsWeather, getTomorrowWeather);
-    }
-  }
+  if (state.isFetching) return;
+  state.isFetching = true;
 
-  let lastError = null;
-  for (const load of options) {
-    try {
-      const data = await load();
-      renderWeather(data);
-      el.status.textContent = "";
-      return;
-    } catch (err) {
-      lastError = err;
-    }
-  }
+  try {
+    const location = await resolveLocation();
+    state.latitude = location.latitude;
+    state.longitude = location.longitude;
 
-  el.status.textContent = `Weather update failed: ${lastError?.message || "Unknown error"}`;
+    const options = [];
+    if (CONFIG.provider === "nws") options.push(getNwsWeather);
+    if (CONFIG.provider === "tomorrow") options.push(getTomorrowWeather);
+    if (CONFIG.provider === "auto") {
+      // If Tomorrow key exists, try Tomorrow first. Otherwise NWS first.
+      if (CONFIG.tomorrowApiKey) {
+        options.push(getTomorrowWeather, getNwsWeather);
+      } else {
+        options.push(getNwsWeather, getTomorrowWeather);
+      }
+    }
+
+    let lastError = null;
+    for (const load of options) {
+      try {
+        const data = await load();
+        renderWeather(data);
+        el.status.textContent = "";
+        return true;
+      } catch (err) {
+        lastError = err;
+      }
+    }
+
+    el.status.textContent = `Weather update failed: ${lastError?.message || "Unknown error"}`;
+    return false;
+  } finally {
+    state.isFetching = false;
+  }
 }
 
 function init() {
@@ -320,7 +383,18 @@ function init() {
   setInterval(formatDateTime, 1000);
 
   fetchWeather();
-  setInterval(fetchWeather, REFRESH_INTERVAL_MS);
+  setInterval(async () => {
+    const ok = await fetchWeather();
+    if (ok) return;
+    // Retry more quickly when a provider is temporarily unavailable.
+    setTimeout(fetchWeather, RETRY_INTERVAL_MS);
+  }, REFRESH_INTERVAL_MS);
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      fetchWeather();
+    }
+  });
 }
 
 init();
