@@ -36,6 +36,7 @@ const el = {
   temp: document.getElementById("current-temp"),
   summary: document.getElementById("current-summary"),
   forecast: document.getElementById("hourly-forecast"),
+  forecast2: document.getElementById("hourly-forecast-2"),
   dailyForecast: document.getElementById("daily-forecast"),
   status: document.getElementById("status"),
   lastUpdated: document.getElementById("last-updated"),
@@ -167,9 +168,11 @@ function renderWeather(data) {
     timeZone,
   })}`;
 
-  const nextHourly = getNextHourlyWindow(data.hourly, 8);
+  const nextHourly = getNextHourlyWindow(data.hourly, 16);
+  const firstRow = nextHourly.slice(0, 8);
+  const secondRow = nextHourly.slice(8, 16);
 
-  const cards = nextHourly
+  const cards = firstRow
     .map((hour) => {
       const icon = pickIcon(hour.summary);
       return `
@@ -184,6 +187,21 @@ function renderWeather(data) {
     .join("");
 
   el.forecast.innerHTML = cards;
+  if (el.forecast2) {
+    el.forecast2.innerHTML = secondRow
+      .map((hour) => {
+        const icon = pickIcon(hour.summary);
+        return `
+        <article class="forecast-item">
+          <p class="forecast-time">${formatHour(hour.time)}</p>
+          <p class="forecast-icon" aria-hidden="true">${icon}</p>
+          <p class="forecast-temp">${Math.round(hour.temperature)}°${hour.unit}</p>
+          <p class="forecast-summary">${hour.summary}</p>
+        </article>
+      `;
+      })
+      .join("");
+  }
 
   const dailyCards = data.daily
     .slice(0, 5)

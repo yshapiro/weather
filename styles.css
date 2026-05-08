@@ -108,6 +108,10 @@ body {
   padding-bottom: 0.25rem;
 }
 
+.hourly-row + .hourly-row {
+  margin-top: 0.55rem;
+}
+
 .daily-row {
   grid-auto-columns: minmax(135px, 1fr);
 }
