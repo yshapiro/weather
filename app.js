@@ -348,15 +348,18 @@ async function fetchWeather() {
     state.longitude = location.longitude;
 
     const options = [];
-    if (CONFIG.provider === "nws") options.push(getNwsWeather);
-    if (CONFIG.provider === "tomorrow") options.push(getTomorrowWeather);
-    if (CONFIG.provider === "auto") {
-      // If Tomorrow key exists, try Tomorrow first. Otherwise NWS first.
+    if (CONFIG.provider === "nws") {
+      options.push(getNwsWeather);
+    } else if (CONFIG.provider === "tomorrow") {
       if (CONFIG.tomorrowApiKey) {
-        options.push(getTomorrowWeather, getNwsWeather);
-      } else {
-        options.push(getNwsWeather, getTomorrowWeather);
+        options.push(getTomorrowWeather);
       }
+      options.push(getNwsWeather);
+    } else if (CONFIG.provider === "auto") {
+      if (CONFIG.tomorrowApiKey) {
+        options.push(getTomorrowWeather);
+      }
+      options.push(getNwsWeather);
     }
 
     let lastError = null;
