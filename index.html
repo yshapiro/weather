@@ -2,6 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
+    <meta http-equiv="Cache-Control" content="no-store, no-cache, must-revalidate" />
+    <meta http-equiv="Pragma" content="no-cache" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Weather Wall Display</title>
     <link rel="stylesheet" href="./styles.css" />
@@ -42,8 +44,26 @@
       </section>
 
       <p id="status" class="status" role="status" aria-live="polite"></p>
+
+      <section id="api-setup" class="card api-setup" hidden>
+        <p class="label">API key (this device only)</p>
+        <p class="api-setup-hint">
+          Paste your AccuWeather key once. It is stored in this browser only (like the console <code>localStorage</code> trick), not on GitHub.
+        </p>
+        <div class="api-setup-row">
+          <input
+            id="api-key-input"
+            type="password"
+            autocomplete="off"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="AccuWeather API key"
+          />
+          <button id="api-key-save" type="button">Save</button>
+        </div>
+      </section>
     </main>
 
-    <script src="./app.js?v=20260510-2"></script>
+    <script src="./weather-accu.js?v=20260510-8"></script>
   </body>
   </html>

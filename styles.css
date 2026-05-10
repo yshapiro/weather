@@ -160,6 +160,54 @@ body {
   font-size: 0.95rem;
 }
 
+.api-setup {
+  margin-top: 0.5rem;
+}
+
+.api-setup-hint {
+  margin: 0.5rem 0 1rem;
+  color: var(--muted);
+  font-size: clamp(0.85rem, 1.4vw, 1rem);
+  line-height: 1.45;
+}
+
+.api-setup-hint code {
+  font-size: 0.9em;
+  color: var(--accent);
+}
+
+.api-setup-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.api-setup-row input {
+  flex: 1;
+  min-width: min(100%, 220px);
+  padding: 0.65rem 0.85rem;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.api-setup-row button {
+  padding: 0.65rem 1.2rem;
+  border-radius: 10px;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 22%, var(--card));
+  color: var(--text);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.api-setup-row button:active {
+  transform: scale(0.98);
+}
+
 @media (max-width: 900px) {
   .top-row {
     grid-template-columns: 1fr;
