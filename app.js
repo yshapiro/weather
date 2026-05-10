@@ -8,12 +8,29 @@ const CONFIG = {
   // Keep null to follow the iPad/browser local timezone automatically.
   timezone: null,
 
-  // Options: "nws", "tomorrow", "openmeteo", "auto"
+  // Options: "nws", "tomorrow", "openmeteo", "accuweather", "auto"
   provider: "auto",
 
   // Required only for Tomorrow.io usage.
   tomorrowApiKey: "",
+
+  // AccuWeather: leave empty in git. Set `window.__ACCUWEATHER_API_KEY__` before app.js, or
+  // localStorage key `weatherAccuWeatherApiKey`, or paste here only in a private copy.
+  accuWeatherApiKey: "",
 };
+
+function getAccuWeatherApiKey() {
+  if (typeof window !== "undefined" && window.__ACCUWEATHER_API_KEY__) {
+    return String(window.__ACCUWEATHER_API_KEY__);
+  }
+  try {
+    const stored = localStorage.getItem("weatherAccuWeatherApiKey");
+    if (stored) return stored;
+  } catch {
+    /* ignore */
+  }
+  return CONFIG.accuWeatherApiKey || "";
+}
 
 const WEATHER_ICONS = [
   { test: /sunny|clear/i, icon: "☀️" },
@@ -48,6 +65,7 @@ const state = {
   latitude: CONFIG.latitude,
   longitude: CONFIG.longitude,
   isFetching: false,
+  accuLocationCache: null,
 };
 
 function fetchNoCache(url) {
@@ -168,9 +186,9 @@ function renderWeather(data) {
     timeZone,
   })}`;
 
-  const nextHourly = getNextHourlyWindow(data.hourly, 16);
-  const firstRow = nextHourly.slice(0, 8);
-  const secondRow = nextHourly.slice(8, 16);
+  const nextHourly = getNextHourlyWindow(data.hourly, 12);
+  const firstRow = nextHourly.slice(0, 6);
+  const secondRow = nextHourly.slice(6, 12);
 
   const cards = firstRow
     .map((hour) => {
@@ -301,6 +319,156 @@ async function getNwsWeather() {
       summary: p.shortForecast || "Unavailable",
     })),
     daily: buildDailyFromHourly(periods),
+  };
+}
+
+async function accuWeatherFetch(path, extraParams = {}) {
+  const apiKey = getAccuWeatherApiKey();
+  if (!apiKey) {
+    throw new Error("AccuWeather API key is missing");
+  }
+
+  const buildUrl = (includeApiKeyQuery) => {
+    const url = new URL(`https://dataservice.accuweather.com${path}`);
+    for (const [k, v] of Object.entries(extraParams)) {
+      url.searchParams.set(k, String(v));
+    }
+    url.searchParams.set("_t", `${Date.now()}`);
+    if (includeApiKeyQuery) url.searchParams.set("apikey", apiKey);
+    return url.toString();
+  };
+
+  const attemptFetch = async (mode) => {
+    const url = buildUrl(mode === "query");
+    const opts = { cache: "no-store" };
+    if (mode === "bearer") {
+      opts.headers = { Authorization: `Bearer ${apiKey}` };
+    }
+    return fetch(url, opts);
+  };
+
+  let res = await attemptFetch("query");
+  if (res.status === 401 || res.status === 403) {
+    res = await attemptFetch("bearer");
+  }
+  return res;
+}
+
+async function accuWeatherResolveLocation() {
+  const cache = state.accuLocationCache;
+  if (
+    cache &&
+    cache.lat === state.latitude &&
+    cache.lon === state.longitude &&
+    cache.key
+  ) {
+    return cache;
+  }
+
+  const res = await accuWeatherFetch("/locations/v1/cities/geoposition/search", {
+    q: `${state.latitude},${state.longitude}`,
+  });
+  if (!res.ok) {
+    throw new Error(`AccuWeather location lookup failed (${res.status})`);
+  }
+  const data = await res.json();
+  const root = Array.isArray(data) ? data[0] : data;
+  if (!root?.Key) {
+    throw new Error("AccuWeather returned no location key");
+  }
+  const admin = root.AdministrativeArea?.LocalizedName || root.AdministrativeArea?.ID || "";
+  const label = [root.LocalizedName, admin].filter(Boolean).join(", ");
+  state.accuLocationCache = {
+    lat: state.latitude,
+    lon: state.longitude,
+    key: root.Key,
+    label: label || `ZIP ${CONFIG.zipCode}`,
+  };
+  return state.accuLocationCache;
+}
+
+async function getAccuWeather() {
+  if (!getAccuWeatherApiKey()) {
+    throw new Error("AccuWeather API key is missing");
+  }
+
+  const { key, label } = await accuWeatherResolveLocation();
+
+  const [curRes, hourlyRes, dailyRes] = await Promise.all([
+    accuWeatherFetch(`/currentconditions/v1/${key}`, { details: "false" }),
+    accuWeatherFetch(`/forecasts/v1/hourly/24hour/${key}`, {
+      metric: "false",
+      details: "false",
+    }),
+    accuWeatherFetch(`/forecasts/v1/daily/5day/${key}`, {
+      metric: "false",
+      details: "false",
+    }),
+  ]);
+
+  if (!curRes.ok) {
+    throw new Error(`AccuWeather current conditions failed (${curRes.status})`);
+  }
+  if (!hourlyRes.ok) {
+    throw new Error(`AccuWeather hourly forecast failed (${hourlyRes.status})`);
+  }
+  if (!dailyRes.ok) {
+    throw new Error(`AccuWeather daily forecast failed (${dailyRes.status})`);
+  }
+
+  const currentArr = await curRes.json();
+  const hourlyArr = await hourlyRes.json();
+  const dailyJson = await dailyRes.json();
+
+  const cur0 = Array.isArray(currentArr) ? currentArr[0] : currentArr;
+  if (!cur0) {
+    throw new Error("AccuWeather returned no current conditions");
+  }
+
+  const tempImp = cur0.Temperature?.Imperial || cur0.Temperature?.Metric;
+  const currentTemp = tempImp?.Value;
+  const unit = tempImp?.Unit || "F";
+  const summary = cur0.WeatherText || "Unavailable";
+
+  const hourlyRaw = Array.isArray(hourlyArr) ? hourlyArr : [];
+  const hourly = hourlyRaw.slice(0, 72).map((h) => {
+    const t = h.Temperature;
+    const val =
+      typeof t?.Value === "number"
+        ? t.Value
+        : t?.Imperial?.Value ?? t?.Metric?.Value;
+    const u = t?.Unit || t?.Imperial?.Unit || t?.Metric?.Unit || "F";
+    return {
+      time: h.DateTime,
+      temperature: val,
+      unit: u,
+      summary: h.IconPhrase || h.ShortPhrase || "Unavailable",
+    };
+  });
+
+  const dailyForecasts = dailyJson.DailyForecasts || [];
+  const daily = dailyForecasts.slice(0, 5).map((d) => ({
+    time: d.Date,
+    high: d.Temperature?.Maximum?.Value,
+    low: d.Temperature?.Minimum?.Value,
+    unit: d.Temperature?.Maximum?.Unit || "F",
+    summary: d.Day?.IconPhrase || d.Night?.IconPhrase || "Unavailable",
+  }));
+
+  if (!Number.isFinite(currentTemp) || hourly.length === 0 || daily.length === 0) {
+    throw new Error("AccuWeather returned incomplete forecast data");
+  }
+
+  return {
+    source: "AccuWeather",
+    location: `${label} (ZIP ${CONFIG.zipCode})`,
+    current: {
+      temperature: currentTemp,
+      unit,
+      summary,
+    },
+    hourly,
+    daily,
   };
 }
 
@@ -478,16 +646,31 @@ async function fetchWeather() {
     const options = [];
     if (CONFIG.provider === "nws") {
       options.push(getNwsWeather);
+    } else if (CONFIG.provider === "accuweather") {
+      if (getAccuWeatherApiKey()) {
+        options.push(getAccuWeather);
+      }
+      options.push(getOpenMeteoWeather);
+      options.push(getNwsWeather);
     } else if (CONFIG.provider === "tomorrow") {
+      if (getAccuWeatherApiKey()) {
+        options.push(getAccuWeather);
+      }
       if (CONFIG.tomorrowApiKey) {
         options.push(getTomorrowWeather);
       }
       options.push(getOpenMeteoWeather);
       options.push(getNwsWeather);
     } else if (CONFIG.provider === "openmeteo") {
+      if (getAccuWeatherApiKey()) {
+        options.push(getAccuWeather);
+      }
       options.push(getOpenMeteoWeather);
       options.push(getNwsWeather);
     } else if (CONFIG.provider === "auto") {
+      if (getAccuWeatherApiKey()) {
+        options.push(getAccuWeather);
+      }
       if (CONFIG.tomorrowApiKey) {
         options.push(getTomorrowWeather);
       }
